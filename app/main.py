@@ -655,6 +655,7 @@ async def log(interaction: discord.Interaction):
 
 @client.event
 async def on_ready():
+    await tree.sync()
     print(f'起動: {client.user}')
 
     channel = client.get_channel(1504126531256061982)
