@@ -655,10 +655,10 @@ async def log(interaction: discord.Interaction):
 async def on_ready():
     print(f'起動: {client.user}')
 
-    channel = client.get_channel(1260454361297850432)
+    channel = client.get_channel(1504126531256061982)
 
     # 既存のEmbedを全部削除
-    async for message in channel.history(limit=None):
+    async for message in channel.history(limit=20):
         if message.author == client.user and message.embeds:
             await message.delete()
 
