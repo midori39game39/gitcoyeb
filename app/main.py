@@ -5,6 +5,7 @@ from discord import app_commands
 import random
 import dotenv
 from server import server_thread
+import numpy as np
 
 dotenv.load_dotenv()
 
