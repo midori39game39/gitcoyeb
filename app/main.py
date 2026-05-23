@@ -493,10 +493,122 @@ async def weapontype_autocomplete(interaction: discord.Interaction, current: str
         if current in name
     ][:25]
 
+vc_clients = {}
+mixers = {}
+
+# フォルダごとに分類 { 'a': ['./sounds/a/1.wav', ...], 'b': [...] }
+SOUNDS = {}
+SOUNDS_DIR = './sounds'
+
+for folder in sorted(os.listdir(SOUNDS_DIR)):
+    folder_path = os.path.join(SOUNDS_DIR, folder)
+    if os.path.isdir(folder_path):
+        files = [
+            os.path.join(folder_path, file)
+            for file in sorted(os.listdir(folder_path))
+            if file.endswith(('.mp3', '.wav', '.ogg', '.flac'))
+        ]
+        if files:
+            SOUNDS[folder] = files
+
+
+class MixingAudioSource(discord.AudioSource):
+    def __init__(self):
+        self.sources = []
+
+    def add_source(self, source: discord.AudioSource):
+        self.sources.append(source)
+
+    def read(self) -> bytes:
+        if not self.sources:
+            return bytes(3840)
+
+        frames = []
+        finished = []
+
+        for source in self.sources:
+            data = source.read()
+            if len(data) == 0:
+                finished.append(source)
+            else:
+                frames.append(np.frombuffer(data, dtype=np.int16).astype(np.float32))
+
+        for source in finished:
+            self.sources.remove(source)
+
+        if not frames:
+            return bytes(3840)
+
+        mixed = np.sum(frames, axis=0)
+        mixed = np.clip(mixed, -32768, 32767).astype(np.int16)
+        return mixed.tobytes()
+
+    def is_opus(self) -> bool:
+        return False
+
+
+class SoundboardView(discord.ui.View):
+    def __init__(self, sounds: list):  # そのフォルダのファイルリストを受け取る
+        super().__init__(timeout=None)
+
+        for i, sound_path in enumerate(sounds):
+            button = discord.ui.Button(
+                label=os.path.splitext(os.path.basename(sound_path))[0],
+                style=discord.ButtonStyle.primary,
+                custom_id=sound_path,  # パスをそのままcustom_idに
+                row=i % 5
+            )
+            button.callback = self.make_callback(sound_path)
+            self.add_item(button)
+
+    def make_callback(self, sound_path: str):
+        async def callback(interaction: discord.Interaction):
+            await play_sound(interaction, sound_path)
+        return callback
+
+
+async def play_sound(interaction: discord.Interaction, sound_path: str):
+    if not interaction.user.voice or not interaction.user.voice.channel:
+        await interaction.response.send_message('先にVCに入ってください', ephemeral=True)
+        return
+
+    voice_channel = interaction.user.voice.channel
+    channel_id = voice_channel.id
+
+    if not sound_path or not os.path.exists(sound_path):
+        await interaction.response.send_message('音声ファイルが見つかりません', ephemeral=True)
+        return
+
+    if channel_id not in vc_clients or not vc_clients[channel_id].is_connected():
+        vc = await voice_channel.connect()
+        vc_clients[channel_id] = vc
+        mixers[channel_id] = MixingAudioSource()
+        vc.play(mixers[channel_id])
+
+    mixers[channel_id].add_source(discord.FFmpegPCMAudio(sound_path))
+
+    await interaction.response.send_message(
+        f'🔊 {interaction.user.display_name} が再生中...', ephemeral=True
+    )
+
+
 @client.event
 async def on_ready():
-    await tree.sync()
-    print(f"起動: {client.user}")
+    print(f'起動: {client.user}')
+
+    channel = client.get_channel(1260454361297850432)
+
+    # 既存のEmbedを全部削除
+    async for message in channel.history(limit=50):
+        if message.author == client.user and message.embeds:
+            await message.delete()
+
+    # フォルダごとにEmbedとボタンを送信
+    for folder, sounds in SOUNDS.items():
+        embed = discord.Embed(title=folder, color=discord.Color.blurple())
+        view = SoundboardView(sounds)
+        client.add_view(view)  # 再起動後もボタンが機能するよう登録
+        await channel.send(embed=embed, view=view)
 
 server_thread()
 client.run(TOKEN)
