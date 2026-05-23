@@ -496,7 +496,9 @@ async def weapontype_autocomplete(interaction: discord.Interaction, current: str
 
 vc_clients = {}
 mixers = {}
-
+vc_logs = {}  # { channel_id: [ {user, sound, time}, ... ] }
+# グローバルな音量管理 (0.0 〜 2.0)
+sb_volume = 1.0
 # フォルダごとに分類 { 'a': ['./sounds/a/1.wav', ...], 'b': [...] }
 SOUNDS = {}
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -518,7 +520,11 @@ class MixingAudioSource(discord.AudioSource):
     def __init__(self):
         self.sources = []
 
+    MAX_SOURCES = 5
+
     def add_source(self, source: discord.AudioSource):
+        if len(self.sources) >= self.MAX_SOURCES:
+            return
         self.sources.append(source)
 
     def read(self) -> bytes:
@@ -542,11 +548,26 @@ class MixingAudioSource(discord.AudioSource):
             return bytes(3840)
 
         mixed = np.sum(frames, axis=0)
+        mixed = mixed * sb_volume  # 音量を適用
         mixed = np.clip(mixed, -32768, 32767).astype(np.int16)
         return mixed.tobytes()
 
     def is_opus(self) -> bool:
         return False
+
+
+@tree.command(name="sbvolume", description="サウンドボードの音量を変更します (0〜200)")
+@app_commands.describe(volume="音量を0〜200で指定します (デフォルト: 100)")
+async def sbvolume(interaction: discord.Interaction, volume: int):
+    global sb_volume
+
+    if volume < 0 or volume > 200:
+        await interaction.response.send_message('音量は0〜200で指定してください', ephemeral=True)
+        return
+
+    sb_volume = volume / 100.0  # 100を1.0に正規化
+
+    await interaction.response.send_message(f'🔊 音量を {volume} に変更しました')
 
 
 class SoundboardView(discord.ui.View):
@@ -587,8 +608,48 @@ async def play_sound(interaction: discord.Interaction, sound_path: str):
         mixers[channel_id] = MixingAudioSource()
         vc.play(mixers[channel_id])
 
+    # 上限チェック
+    if len(mixers[channel_id].sources) >= MixingAudioSource.MAX_SOURCES:
+        await interaction.response.send_message('再生数が上限に達しています', ephemeral=True)
+        return
+
+    # 音源追加
     mixers[channel_id].add_source(discord.FFmpegPCMAudio(sound_path))
 
+    # ログ記録
+    if channel_id not in vc_logs:
+        vc_logs[channel_id] = []
+    vc_logs[channel_id].append({
+        'user': interaction.user.display_name,
+        'sound': os.path.splitext(os.path.basename(sound_path))[0],
+        'time': discord.utils.utcnow().strftime('%H:%M:%S')
+    })
+
+    # 30件超えたら古いものを削除
+    if len(vc_logs[channel_id]) > 30:
+        vc_logs[channel_id].pop(0)
+
+@tree.command(name="sblog", description="このVCのサウンドボードログを表示します")
+async def log(interaction: discord.Interaction):
+    if not interaction.user.voice or not interaction.user.voice.channel:
+        await interaction.response.send_message('先にVCに入ってください', ephemeral=True)
+        return
+
+    channel_id = interaction.user.voice.channel.id
+
+    if channel_id not in vc_logs or not vc_logs[channel_id]:
+        await interaction.response.send_message('ログがありません', ephemeral=True)
+        return
+
+    # ログをEmbed化
+    embed = discord.Embed(title='サウンドボードログ', color=discord.Color.blurple())
+    lines = [
+        f'`{entry["time"]}` {entry["user"]} → {entry["sound"]}'
+        for entry in vc_logs[channel_id][-30:]
+    ]
+    embed.description = '\n'.join(lines)
+
+    await interaction.response.send_message(embed=embed)
 
 @client.event
 async def on_ready():
