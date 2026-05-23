@@ -598,7 +598,7 @@ async def play_sound(interaction: discord.Interaction, sound_path: str):
 async def on_ready():
     print(f'起動: {client.user}')
 
-    channel = client.get_channel(1260454361297850432)
+    channel = client.get_channel(1504126531256061982)
 
     # 既存のEmbedを全部削除
     async for message in channel.history(limit=50):
