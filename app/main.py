@@ -498,7 +498,8 @@ mixers = {}
 
 # フォルダごとに分類 { 'a': ['./sounds/a/1.wav', ...], 'b': [...] }
 SOUNDS = {}
-SOUNDS_DIR = './sounds'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SOUNDS_DIR = os.path.join(BASE_DIR, 'sounds')
 
 for folder in sorted(os.listdir(SOUNDS_DIR)):
     folder_path = os.path.join(SOUNDS_DIR, folder)
