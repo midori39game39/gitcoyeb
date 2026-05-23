@@ -658,7 +658,7 @@ async def on_ready():
     channel = client.get_channel(1504126531256061982)
 
     # 既存のEmbedを全部削除
-    async for message in channel.history(limit=50):
+    async for message in channel.history(limit=None):
         if message.author == client.user and message.embeds:
             await message.delete()
 
