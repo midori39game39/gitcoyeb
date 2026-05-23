@@ -629,6 +629,8 @@ async def play_sound(interaction: discord.Interaction, sound_path: str):
     if len(vc_logs[channel_id]) > 30:
         vc_logs[channel_id].pop(0)
 
+    await interaction.response.defer()
+
 @tree.command(name="sblog", description="このVCのサウンドボードログを表示します")
 async def log(interaction: discord.Interaction):
     if not interaction.user.voice or not interaction.user.voice.channel:
