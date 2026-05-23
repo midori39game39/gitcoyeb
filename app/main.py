@@ -589,10 +589,6 @@ async def play_sound(interaction: discord.Interaction, sound_path: str):
 
     mixers[channel_id].add_source(discord.FFmpegPCMAudio(sound_path))
 
-    await interaction.response.send_message(
-        f'🔊 {interaction.user.display_name} が再生中...', ephemeral=True
-    )
-
 
 @client.event
 async def on_ready():
