@@ -503,6 +503,8 @@ sb_volume = 1.0
 SOUNDS = {}
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SOUNDS_DIR = os.path.join(BASE_DIR, 'sounds')
+playing_counts = {}
+MAX_SAME_SOUND = 2
 
 for folder in sorted(os.listdir(SOUNDS_DIR)):
     folder_path = os.path.join(SOUNDS_DIR, folder)
@@ -602,30 +604,29 @@ async def play_sound(interaction: discord.Interaction, sound_path: str):
         await interaction.response.send_message('音声ファイルが見つかりません', ephemeral=True)
         return
 
+    # 同一音源の同時再生数チェック
+    if playing_counts.get(sound_path, 0) >= MAX_SAME_SOUND:
+        await interaction.response.send_message('再生数が上限に達しています', ephemeral=True)
+        return
+
     if channel_id not in vc_clients or not vc_clients[channel_id].is_connected():
-    # すでに別のVCに接続中の場合はそのまま使う
-    existing_vc = discord.utils.get(client.voice_clients, guild=interaction.guild)
-    if existing_vc and existing_vc.channel.id != channel_id:
-        # 別のVCに接続中 → 新しいVCに追加接続
         vc = await voice_channel.connect()
-    elif existing_vc and existing_vc.channel.id == channel_id:
-        # 同じVCにすでに接続中
-        vc = existing_vc
-    else:
-        # 未接続
-        vc = await voice_channel.connect()
-    
-    vc_clients[channel_id] = vc
-    mixers[channel_id] = MixingAudioSource()
-    vc.play(mixers[channel_id])
+        vc_clients[channel_id] = vc
+        mixers[channel_id] = MixingAudioSource()
+        vc.play(mixers[channel_id])
 
     # 上限チェック
     if len(mixers[channel_id].sources) >= MixingAudioSource.MAX_SOURCES:
         await interaction.response.send_message('再生数が上限に達しています', ephemeral=True)
         return
 
-    # 音源追加
-    mixers[channel_id].add_source(discord.FFmpegPCMAudio(sound_path))
+    # 再生数を増やす
+    playing_counts[sound_path] = playing_counts.get(sound_path, 0) + 1
+
+    # 再生終了時に再生数を減らすラッパー
+    source = discord.FFmpegPCMAudio(sound_path)
+    wrapped = CountedSource(source, sound_path)
+    mixers[channel_id].add_source(wrapped)
 
     # ログ記録
     if channel_id not in vc_logs:
@@ -633,14 +634,27 @@ async def play_sound(interaction: discord.Interaction, sound_path: str):
     vc_logs[channel_id].append({
         'user': interaction.user.display_name,
         'sound': os.path.splitext(os.path.basename(sound_path))[0],
-        'time': discord.utils.utcnow().strftime('%H:%M:%S')
+        'time': discord.utils.utcnow().astimezone(timezone(timedelta(hours=9))).strftime('%H:%M:%S')
     })
-
-    # 30件超えたら古いものを削除
     if len(vc_logs[channel_id]) > 30:
         vc_logs[channel_id].pop(0)
 
     await interaction.response.defer()
+
+class CountedSource(discord.AudioSource):
+    def __init__(self, source: discord.AudioSource, sound_path: str):
+        self.source = source
+        self.sound_path = sound_path
+
+    def read(self) -> bytes:
+        data = self.source.read()
+        if len(data) == 0:
+            # 再生終了したら再生数を減らす
+            playing_counts[self.sound_path] = max(0, playing_counts.get(self.sound_path, 1) - 1)
+        return data
+
+    def is_opus(self) -> bool:
+        return False
 
 @tree.command(name="sblog", description="このVCのサウンドボードログを表示します")
 async def log(interaction: discord.Interaction):
