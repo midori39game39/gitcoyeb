@@ -603,10 +603,21 @@ async def play_sound(interaction: discord.Interaction, sound_path: str):
         return
 
     if channel_id not in vc_clients or not vc_clients[channel_id].is_connected():
+    # すでに別のVCに接続中の場合はそのまま使う
+    existing_vc = discord.utils.get(client.voice_clients, guild=interaction.guild)
+    if existing_vc and existing_vc.channel.id != channel_id:
+        # 別のVCに接続中 → 新しいVCに追加接続
         vc = await voice_channel.connect()
-        vc_clients[channel_id] = vc
-        mixers[channel_id] = MixingAudioSource()
-        vc.play(mixers[channel_id])
+    elif existing_vc and existing_vc.channel.id == channel_id:
+        # 同じVCにすでに接続中
+        vc = existing_vc
+    else:
+        # 未接続
+        vc = await voice_channel.connect()
+    
+    vc_clients[channel_id] = vc
+    mixers[channel_id] = MixingAudioSource()
+    vc.play(mixers[channel_id])
 
     # 上限チェック
     if len(mixers[channel_id].sources) >= MixingAudioSource.MAX_SOURCES:
